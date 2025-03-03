@@ -123,19 +123,28 @@ type RemoteQueryConfiguration struct {
 // SystemConfiguration defines basic system configuration settings.
 type SystemConfiguration struct {
 	// The root directory where all of the pterodactyl data is stored at.
-	RootDirectory string `default:"/var/lib/pterodactyl" json:"-" yaml:"root_directory"`
+	RootDirectory string `default:"/var/lib/pterodactyl" json:"root_directory"`
 
 	// Directory where logs for server installations and other wings events are logged.
-	LogDirectory string `default:"/var/log/pterodactyl" json:"-" yaml:"log_directory"`
+	LogDirectory string `default:"/var/log/pterodactyl" json:"log_directory"`
 
 	// Directory where the server data is stored at.
-	Data string `default:"/var/lib/pterodactyl/volumes" json:"-" yaml:"data"`
+	Data string `default:"/var/lib/pterodactyl/volumes" json:"data"`
 
 	// Directory where server archives for transferring will be stored.
-	ArchiveDirectory string `default:"/var/lib/pterodactyl/archives" json:"-" yaml:"archive_directory"`
+	ArchiveDirectory string `default:"/var/lib/pterodactyl/archives" json:"archive_directory"`
 
 	// Directory where local backups will be stored on the machine.
 	BackupDirectory string `default:"/var/lib/pterodactyl/backups" json:"-" yaml:"backup_directory"`
+
+	// Directory where restic repositories will be stored.
+	ResticRepoDirectory string `default:"/var/lib/pterodactyl/restic" json:"-" yaml:"restic_repo_directory"`
+
+	// Directory for mounting restic backups.
+	ResticMountDirectory string `default:"/var/lib/pterodactyl/mounts" json:"-" yaml:"restic_mount_directory"`
+
+	// Default SSH key path for restic SSH repositories.
+	ResticSSHKeyPath string `default:"" json:"-" yaml:"restic_ssh_key_path"`
 
 	// TmpDirectory specifies where temporary files for Pterodactyl installation processes
 	// should be created. This supports environments running docker-in-docker.

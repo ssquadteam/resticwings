@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -24,6 +25,7 @@ func postServerBackup(c *gin.Context) {
 		Adapter backup.AdapterType `json:"adapter"`
 		Uuid    string             `json:"uuid"`
 		Ignore  string             `json:"ignore"`
+		Options map[string]string  `json:"options"`
 	}
 	if err := c.BindJSON(&data); err != nil {
 		return
@@ -35,6 +37,8 @@ func postServerBackup(c *gin.Context) {
 		adapter = backup.NewLocal(client, data.Uuid, data.Ignore)
 	case backup.S3BackupAdapter:
 		adapter = backup.NewS3(client, data.Uuid, data.Ignore)
+	case backup.ResticBackupAdapter:
+		adapter = backup.NewRestic(client, data.Uuid, data.Ignore, data.Options)
 	default:
 		middleware.CaptureAndAbort(c, errors.New("router/backups: provided adapter is not valid: "+string(data.Adapter)))
 		return
@@ -75,7 +79,8 @@ func postServerRestoreBackup(c *gin.Context) {
 		TruncateDirectory bool               `json:"truncate_directory"`
 		// A UUID is always required for this endpoint, however the download URL
 		// is only present when the given adapter type is s3.
-		DownloadUrl string `json:"download_url"`
+		DownloadUrl string            `json:"download_url"`
+		Options     map[string]string   `json:"options"`
 	}
 	if err := c.BindJSON(&data); err != nil {
 		return
@@ -120,6 +125,24 @@ func postServerRestoreBackup(c *gin.Context) {
 			s.Events().Publish(server.DaemonMessageEvent, "Completed server restoration from local backup.")
 			s.Events().Publish(server.BackupRestoreCompletedEvent, "")
 			logger.Info("completed server restoration from local backup")
+			s.SetRestoring(false)
+		}(s, b, logger)
+		hasError = false
+		c.Status(http.StatusAccepted)
+		return
+	}
+
+	// Add handling for Restic backups
+	if data.Adapter == backup.ResticBackupAdapter {
+		b := backup.NewRestic(client, c.Param("backup"), "", data.Options)
+		go func(s *server.Server, b backup.BackupInterface, logger *log.Entry) {
+			logger.Info("starting restoration process for server backup using restic driver")
+			if err := s.RestoreBackup(b, nil); err != nil {
+				logger.WithField("error", err).Error("failed to restore restic backup to server")
+			}
+			s.Events().Publish(server.DaemonMessageEvent, "Completed server restoration from restic backup.")
+			s.Events().Publish(server.BackupRestoreCompletedEvent, "")
+			logger.Info("completed server restoration from restic backup")
 			s.SetRestoring(false)
 		}(s, b, logger)
 		hasError = false
@@ -196,4 +219,79 @@ func deleteServerBackup(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// postServerMountBackup mounts a backup for a server to allow browsing its contents.
+// This is only available for restic backups.
+func postServerMountBackup(c *gin.Context) {
+	s := middleware.ExtractServer(c)
+	client := middleware.ExtractApiClient(c)
+	logger := middleware.ExtractLogger(c)
+
+	var data struct {
+		MountPoint string `json:"mount_point"`
+		Options    map[string]string `json:"options"`
+	}
+	if err := c.BindJSON(&data); err != nil {
+		return
+	}
+
+	// Create a restic backup instance
+	b := backup.NewRestic(client, c.Param("backup"), "", data.Options)
+
+	// Attach the server ID and the request ID to the adapter log context for easier parsing
+	b.WithLogContext(map[string]interface{}{
+		"server":     s.ID(),
+		"request_id": c.GetString("request_id"),
+	})
+
+	// Mount the backup
+	go func(b *backup.ResticBackup, s *server.Server, mountPoint string, logger *log.Entry) {
+		logger.Info("mounting backup for server")
+		if err := b.Mount(context.Background(), mountPoint); err != nil {
+			logger.WithField("error", errors.WithStackIf(err)).Error("router: failed to mount server backup")
+			s.Events().Publish(server.DaemonMessageEvent, "Failed to mount backup: "+err.Error())
+		} else {
+			s.Events().Publish(server.DaemonMessageEvent, "Successfully mounted backup.")
+		}
+	}(b.(*backup.ResticBackup), s, data.MountPoint, logger)
+
+	c.Status(http.StatusAccepted)
+}
+
+// deleteServerMountBackup unmounts a previously mounted backup.
+func deleteServerMountBackup(c *gin.Context) {
+	s := middleware.ExtractServer(c)
+	client := middleware.ExtractApiClient(c)
+	logger := middleware.ExtractLogger(c)
+
+	var data struct {
+		MountPoint string `json:"mount_point"`
+		Options    map[string]string `json:"options"`
+	}
+	if err := c.BindJSON(&data); err != nil {
+		return
+	}
+
+	// Create a restic backup instance
+	b := backup.NewRestic(client, c.Param("backup"), "", data.Options)
+
+	// Attach the server ID and the request ID to the adapter log context for easier parsing
+	b.WithLogContext(map[string]interface{}{
+		"server":     s.ID(),
+		"request_id": c.GetString("request_id"),
+	})
+
+	// Unmount the backup
+	go func(b *backup.ResticBackup, s *server.Server, mountPoint string, logger *log.Entry) {
+		logger.Info("unmounting backup for server")
+		if err := b.Unmount(context.Background(), mountPoint); err != nil {
+			logger.WithField("error", errors.WithStackIf(err)).Error("router: failed to unmount server backup")
+			s.Events().Publish(server.DaemonMessageEvent, "Failed to unmount backup: "+err.Error())
+		} else {
+			s.Events().Publish(server.DaemonMessageEvent, "Successfully unmounted backup.")
+		}
+	}(b.(*backup.ResticBackup), s, data.MountPoint, logger)
+
+	c.Status(http.StatusAccepted)
 }
