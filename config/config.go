@@ -345,6 +345,20 @@ type Configuration struct {
 
 	// IgnorePanelConfigUpdates causes confiuration updates that are sent by the panel to be ignored.
 	IgnorePanelConfigUpdates bool `json:"ignore_panel_config_updates" yaml:"ignore_panel_config_updates"`
+
+	// ResticConfig holds the configuration for restic backups
+	Restic ResticConfig `json:"restic" yaml:"restic"`
+}
+
+type ResticConfig struct {
+	// Enabled determines if restic backup support is enabled
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// RepoPath is the base path where restic repositories will be stored
+	RepoPath string `json:"repo_path" yaml:"repo_path"`
+
+	// Password is the password used to encrypt the restic repository
+	Password string `json:"password" yaml:"password"`
 }
 
 // NewAtPath creates a new struct and set the path where it should be stored.
